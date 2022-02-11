@@ -67,8 +67,3 @@ void gen_factorial_section(mpz_t rop, long start, long end, long thread_count)
 		}
 	}
 }
-
-void gen_factorial(mpz_t rop, long number, long thread_count)
-{
-	gen_factorial_section(rop, 0, number, thread_count);
-}
