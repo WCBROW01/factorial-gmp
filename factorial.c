@@ -1,6 +1,6 @@
 #include <stdbool.h>
+#include <stdlib.h>
 #include <pthread.h>
-#include <unistd.h>
 #include <gmp.h>
 
 // Flags for thread status
@@ -28,14 +28,30 @@ static void *run_thread(void *arg)
 	return NULL;
 }
 
+static inline long lsqrt(long n)
+{
+	n = labs(n);
+	long x = n / 2;
+	long xLast = x;
+	long xLast2;
+
+	do {
+		xLast2 = xLast;
+		xLast = x;
+		x = (x + n / x) / 2;
+	} while (x != xLast && x != xLast2);
+
+	return x;
+}
+
 void gen_factorial_section(mpz_t rop, long start, long end, long thread_count)
 {
 	long length = end - start;
 	mpz_set_si(rop, 1);
 
 	/* If the input is less than 1 (either 0 or a negative number),
-	 * grab the number of available processors and use that. */
-	if (thread_count < 1) thread_count = sysconf(_SC_NPROCESSORS_ONLN);
+	 * grab the fourth root of the section length and use that. */
+	if (thread_count < 1) thread_count = lsqrt(lsqrt(length));
 
 	/* If we have a greater quantity of threads than numbers to multiply,
 	 * fall back to 1 thread. */

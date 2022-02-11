@@ -59,14 +59,17 @@ int main(int argc, char *argv[])
 	}
 
 	// If the number is too small, act as if we are single-threaded.
-	if (number < world_size) {
+	if (number < world_size * 4) {
 		if (world_rank == 0) {
+			double start_time = MPI_Wtime();
 			mpz_t result;
 			mpz_init(result);
 			gen_factorial(result, number, 1);
 			printf("Successfully generated %ld!\n", number);
 			if (printing) gmp_printf("%Zd\n", result);
 			mpz_clear(result);
+			double end_time = MPI_Wtime();
+			printf("Time to complete: %fs\n", end_time - start_time);
 		}
 
 		MPI_Finalize();
@@ -74,6 +77,8 @@ int main(int argc, char *argv[])
 	}
 
 	if (world_rank == 0) {
+		double start_time = MPI_Wtime();
+		
 		// Generate the master node's section of the factorial
 		mpz_t result;
 		mpz_init(result);
@@ -103,24 +108,27 @@ int main(int argc, char *argv[])
 		printf("Successfully generated %ld!\n", number);
 		if (printing) gmp_printf("%Zd\n", result);
 		mpz_clear(result);
-    } else {
-    	// Calculate what section of the factorial we want to generate.
-    	long start = world_rank * number / world_size;
-    	long end = (world_rank + 1) * number / world_size;
 
-    	// Start generating factorial
-    	mpz_t section;
-    	mpz_init(section);
-    	gen_factorial_section(section, start, end, thread_count);
+		double end_time = MPI_Wtime();
+		printf("Time to complete: %fs\n", end_time - start_time);
+	} else {
+		// Calculate what section of the factorial we want to generate.
+		long start = world_rank * number / world_size;
+		long end = (world_rank + 1) * number / world_size;
 
-    	// Export the result to an array that we can send over MPI
-    	size_t buf_size;
-    	long *section_buf = mpz_export(NULL, &buf_size, -1, sizeof(long), 0, 0, section);
-    	mpz_clear(section);
-    	MPI_Send(section_buf, buf_size, MPI_LONG, 0, 1, MPI_COMM_WORLD);
-    	free(section_buf);
-    }
+		// Start generating factorial
+		mpz_t section;
+		mpz_init(section);
+		gen_factorial_section(section, start, end, thread_count);
 
-    MPI_Finalize();
-    return 0;
+		// Export the result to an array that we can send over MPI
+		size_t buf_size;
+		long *section_buf = mpz_export(NULL, &buf_size, -1, sizeof(long), 0, 0, section);
+		mpz_clear(section);
+		MPI_Send(section_buf, buf_size, MPI_LONG, 0, 1, MPI_COMM_WORLD);
+		free(section_buf);
+	}
+
+	MPI_Finalize();
+	return 0;
 }
