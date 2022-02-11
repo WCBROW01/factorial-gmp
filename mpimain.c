@@ -74,12 +74,6 @@ int main(int argc, char *argv[])
 	}
 
 	if (world_rank == 0) {
-		for (int node = 1; node < world_size; node++) {
-			// Send bounds for the section of the factorial each node will calculate
-			long bounds[2] = {node * number / world_size, (node + 1) * number / world_size};
-			MPI_Send(bounds, 2, MPI_LONG, node, 0, MPI_COMM_WORLD);
-		}
-
 		// Generate the master node's section of the factorial
 		mpz_t result;
 		mpz_init(result);
@@ -110,14 +104,14 @@ int main(int argc, char *argv[])
 		if (printing) gmp_printf("%Zd\n", result);
 		mpz_clear(result);
     } else {
-    	// Recieve bounds information from master node
-    	long bounds[2];
-    	MPI_Recv(bounds, 2, MPI_LONG, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    	// Calculate what section of the factorial we want to generate.
+    	long start = world_rank * number / world_size;
+    	long end = (world_rank + 1) * number / world_size;
 
     	// Start generating factorial
     	mpz_t section;
     	mpz_init(section);
-    	gen_factorial_section(section, bounds[0], bounds[1], thread_count);
+    	gen_factorial_section(section, start, end, thread_count);
 
     	// Export the result to an array that we can send over MPI
     	size_t buf_size;
