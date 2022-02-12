@@ -86,9 +86,9 @@ static void _gen_thread_list(long n, long **list, long count)
 		_gen_thread_list(lsqrt(lsqrt(n)), list, count + 1);
 	} else {
 		*list = calloc(count + 1, sizeof(long));
-		**list = 0;
+		(*list)[0] = 0;
 	}
-	list[0][++list[0][0]] = n; // this is actually the worst i hate this
+	(*list)[++(*list)[0]] = n; // yes this looks weird
 }
 
 static long *gen_thread_list(long section_length)
