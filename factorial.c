@@ -12,6 +12,8 @@ typedef struct FactorialThread {
 	long start;
 	long end;
 	mpz_t section;
+	long *thread_list;
+	long level;
 	char status;
 } FactorialThread;
 
@@ -20,8 +22,41 @@ static void *run_thread(void *arg)
 	FactorialThread *tdata = (FactorialThread*) arg;
 
 	mpz_init_set_si(tdata->section, 1);
-	for (long count = tdata->start; count <= tdata->end; count++) {
-		mpz_mul_si(tdata->section, tdata->section, count);
+	if (tdata->level < tdata->thread_list[0]) {
+		long length = tdata->end - tdata->start;
+		long thread_count = tdata->thread_list[tdata->level];
+
+		// Initialize each thread and give it a section of the factorial.
+		FactorialThread threads[thread_count];
+		for (long thread_num = 0; thread_num < thread_count; thread_num++) {
+			threads[thread_num] = (FactorialThread){
+				.start = thread_num * length / thread_count + tdata->start + 1,
+				.end = (thread_num + 1) * length / thread_count + tdata->start,
+				.thread_list = tdata->thread_list,
+				.level = tdata->level + 1,
+				.status = 0
+			};
+
+			pthread_create(&threads[thread_num].thread, NULL, run_thread, &threads[thread_num]);
+		}
+
+		// Spin each thread until all of them have reported that they are complete.
+		bool finished = false;
+		while (!finished) {
+			finished = true;
+			for (long thread_num = 0; thread_num < thread_count; thread_num++) {
+				if (!threads[thread_num].status & S_COMPLETE) finished = false;
+				else if (!(threads[thread_num].status & S_RETURNED)) {
+					mpz_mul(tdata->section, tdata->section, threads[thread_num].section);
+					mpz_clear(threads[thread_num].section);
+					threads[thread_num].status |= S_RETURNED;
+				}
+			}
+		}
+	} else {
+		for (long count = tdata->start; count <= tdata->end; count++) {
+			mpz_mul_si(tdata->section, tdata->section, count);
+		}
 	}
 
 	tdata->status |= S_COMPLETE;
@@ -44,42 +79,50 @@ static inline long lsqrt(long n)
 	return x;
 }
 
-void gen_factorial_section(mpz_t rop, long start, long end, long thread_count)
+static void _gen_thread_list(long n, long **list, long count)
 {
-	long length = end - start;
-	mpz_set_si(rop, 1);
+	// This array will be used to generate a tree of threads
+	if (n >= 16) {
+		_gen_thread_list(lsqrt(lsqrt(n)), list, count + 1);
+	} else {
+		*list = calloc(count + 1, sizeof(long));
+		**list = 0;
+	}
+	list[0][++list[0][0]] = n; // this is actually the worst i hate this
+}
 
-	/* If the input is less than 1 (either 0 or a negative number),
-	 * grab the fourth root of the section length and use that. */
-	if (thread_count < 1) thread_count = lsqrt(lsqrt(length));
+static long *gen_thread_list(long section_length)
+{
+	long *list;
+	_gen_thread_list(section_length, &list, 1);
+	return list;
+}
 
-	/* If we have a greater quantity of threads than numbers to multiply,
-	 * fall back to 1 thread. */
-	if (length < thread_count) thread_count = 1;
-
-	// Initialize each thread and give it a section of the factorial.
-	FactorialThread threads[thread_count];
-	for (long thread_num = 0; thread_num < thread_count; thread_num++) {
-		threads[thread_num] = (FactorialThread){
-			.start = thread_num * length / thread_count + start + 1,
-			.end = (thread_num + 1) * length / thread_count + start,
+void gen_factorial_section(mpz_t rop, long start, long end)
+{
+	if ((end - start) > 16) {
+		long *thread_list = gen_thread_list(end - start);
+		FactorialThread main_thread = {
+			.start = start,
+			.end = end,
+			.thread_list = thread_list,
+			.level = 1,
 			.status = 0
 		};
 
-		pthread_create(&threads[thread_num].thread, NULL, run_thread, &threads[thread_num]);
-	}
+		/* This is not how this function would normally be used but we would
+		 * just be joining the thread immediately anyways. */
+		run_thread(&main_thread);
+		free(thread_list);
 
-	// Spin each thread until all of them have reported that they are complete.
-	bool finished = false;
-	while (!finished) {
-		finished = true;
-		for (long thread_num = 0; thread_num < thread_count; thread_num++) {
-			if (!threads[thread_num].status & S_COMPLETE) finished = false;
-			else if (!(threads[thread_num].status & S_RETURNED)) {
-				mpz_mul(rop, rop, threads[thread_num].section);
-				mpz_clear(threads[thread_num].section);
-				threads[thread_num].status |= S_RETURNED;
-			}
+		mpz_init(rop);
+		mpz_set(rop, main_thread.section);
+		mpz_clear(main_thread.section);
+	} else {
+		mpz_init_set_si(rop, 1);
+		start = start < 1 ? 1 : start;
+		for (long count = start; count <= end; count++) {
+			mpz_mul_si(rop, rop, count);
 		}
 	}
 }

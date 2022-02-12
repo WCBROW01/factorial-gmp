@@ -13,7 +13,6 @@ This program generates a factorial with parallel processing using both MPI and O
 \n\
 Options:\n\
 -n, --number NUMBER\tInput number to calculate the factorial of.\n\
--t, --threads THREADS\tNumber of threads to calculate the factorial with. (Automatically determined if not passed)\n\
 -p, --print\t\tPrint the generated factorial to the screen.";
 
 static void invalid_args(const char *arg_type, int world_rank)
@@ -34,7 +33,6 @@ int main(int argc, char *argv[])
 	MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
 	long number = 0;
-	long thread_count = 0;
 	bool printing = false;
 
 	if (argc < 3 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
@@ -49,22 +47,19 @@ int main(int argc, char *argv[])
 			if (strcmp(argv[i], "-n") == 0 || strcmp(argv[i], "--number") == 0) {
 				number = strtol(argv[i+1], &check_ptr, 10);
 				if (check_ptr == argv[i+1]) invalid_args(argv[i], world_rank);
-			} else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--thread-count") == 0) {
-				thread_count = strtol(argv[i+1], &check_ptr, 10);
-				if (check_ptr == argv[i+1]) invalid_args(argv[i], world_rank);
 			} else if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--print") == 0) {
 				printing = true;
 			}
 		}
 	}
 
-	// If the number is too small, act as if we are single-threaded.
+	// If the number is too small, act as if we have one node.
 	if (number < world_size * 4) {
 		if (world_rank == 0) {
 			double start_time = MPI_Wtime();
 			mpz_t result;
 			mpz_init(result);
-			gen_factorial(result, number, 1);
+			gen_factorial(result, number);
 			printf("Successfully generated %ld!\n", number);
 			if (printing) gmp_printf("%Zd\n", result);
 			mpz_clear(result);
@@ -78,11 +73,11 @@ int main(int argc, char *argv[])
 
 	if (world_rank == 0) {
 		double start_time = MPI_Wtime();
-		
+
 		// Generate the master node's section of the factorial
 		mpz_t result;
 		mpz_init(result);
-		gen_factorial_section(result, 0, number / world_size, thread_count);
+		gen_factorial_section(result, 0, number / world_size);
 
 		// Get the results from all of the other nodes
 		for (int node = 1; node < world_size; node++) {
@@ -119,7 +114,7 @@ int main(int argc, char *argv[])
 		// Start generating factorial
 		mpz_t section;
 		mpz_init(section);
-		gen_factorial_section(section, start, end, thread_count);
+		gen_factorial_section(section, start, end);
 
 		// Export the result to an array that we can send over MPI
 		size_t buf_size;

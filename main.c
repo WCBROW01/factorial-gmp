@@ -13,7 +13,6 @@ This program generates a factorial with parallel processing!\n\
 Options:\n\
 -i, --interactive\tStart in interactive mode. Default if no arguments are passed.\n\
 -n, --number NUMBER\tInput number to calculate the factorial of.\n\
--t, --threads THREADS\tNumber of threads to calculate the factorial with. (Automatically determined if not passed)\n\
 -p, --print\t\tPrint the generated factorial to the screen.";
 
 static void invalid_args(const char *arg_type)
@@ -22,16 +21,9 @@ static void invalid_args(const char *arg_type)
 	exit(1);
 }
 
-static void interactive(long *number, long *thread_count, bool *printing)
+static void interactive(long *number, bool *printing)
 {
 	int result; // this holds the number of inputs scanf found, so it is being used like a boolean
-	printf("How many threads do you want to use? (0 to automatically allocate): ");
-	result = scanf("%ld", thread_count);
-	if (!result) {
-		fprintf(stderr, "Invalid number!\n");
-		exit(1);
-	}
-
 	printf("Enter number to complete factorial: ");
 	result = scanf("%ld", number);
 	if (!result) {
@@ -54,11 +46,10 @@ static void interactive(long *number, long *thread_count, bool *printing)
 int main(int argc, char *argv[])
 {
 	long number = 0;
-	long thread_count = 0;
 	bool printing = false;
 
 	if (argc < 2 || strcmp(argv[1], "-i") == 0 || strcmp(argv[1], "--interactive") == 0) {
-		interactive(&number, &thread_count, &printing);
+		interactive(&number, &printing);
 	} else if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
 		puts(help);
 		return 0;
@@ -73,9 +64,6 @@ int main(int argc, char *argv[])
 			if (strcmp(argv[i], "-n") == 0 || strcmp(argv[i], "--number") == 0) {
 				number = strtol(argv[i+1], &check_ptr, 10);
 				if (check_ptr == argv[i+1]) invalid_args(argv[i]);
-			} else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--thread-count") == 0) {
-				thread_count = strtol(argv[i+1], &check_ptr, 10);
-				if (check_ptr == argv[i+1]) invalid_args(argv[i]);
 			} else if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--print") == 0) {
 				printing = true;
 			}
@@ -83,8 +71,7 @@ int main(int argc, char *argv[])
 	}
 
 	mpz_t result;
-	mpz_init(result);
-	gen_factorial(result, number, thread_count);
+	gen_factorial(result, number);
 	printf("Successfully generated %ld!\n", number);
 	if (printing) gmp_printf("%Zd\n", result);
 
