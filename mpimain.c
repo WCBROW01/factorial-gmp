@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <unistd.h>
 #include <mpi.h>
 #include <gmp.h>
 
@@ -84,11 +85,10 @@ int main(int argc, char *argv[])
 	}
 
 	// If the number is too small, act as if we have one node.
-	if (number < world_size * world_size) {
+	if (number < world_size * 4) {
 		if (world_rank == 0) {
 			double start_time = MPI_Wtime();
 			mpz_t result;
-			mpz_init(result);
 			gen_factorial(result, number);
 			printf("Successfully generated %ld!\n", number);
 			if (printing) gmp_printf("%Zd\n", result);
@@ -107,6 +107,7 @@ int main(int argc, char *argv[])
 		// Generate the master node's section of the factorial
 		pthread_t thread;
 		pthread_create(&thread, NULL, gen_section_mpi, &number);
+
 		mpz_t result;
 		mpz_init_set_ui(result, 1);
 
@@ -121,6 +122,7 @@ int main(int argc, char *argv[])
 			MPI_Probe(MPI_ANY_SOURCE, 1, MPI_COMM_WORLD, &status);
 			MPI_Get_count(&status, MPI_LONG, &count);
 			long *section_buf = malloc(count * sizeof(long));
+			sleep(0);
 			MPI_Recv(section_buf, count, MPI_LONG, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
 			// Import the array back into an mpz object

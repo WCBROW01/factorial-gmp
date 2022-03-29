@@ -88,7 +88,9 @@ static void _gen_thread_list(long n, long **list, long count)
 		*list = calloc(count + 1, sizeof(long));
 		(*list)[0] = 0;
 	}
-	(*list)[++(*list)[0]] = n; // yes this looks weird
+
+	long len = ++(*list)[0]; // First index stores the length, so it is incremented
+	(*list)[len] = n; // len is also the index we will use.
 }
 
 static long *gen_thread_list(long section_length)
