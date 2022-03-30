@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <unistd.h>
+#include <sched.h>
 #include <mpi.h>
 #include <gmp.h>
 
@@ -40,7 +40,6 @@ void *gen_section_mpi(void *arg)
 
 	// Start generating factorial
 	mpz_t section;
-	mpz_init(section);
 	gen_factorial_section(section, start, end);
 
 	// Export the result to an array that we can send over MPI
@@ -114,7 +113,7 @@ int main(int argc, char *argv[])
 		mpz_t section;
 		mpz_init(section);
 
-		// Get the results from all of the other nodes
+		// Get the results from all of the nodes
 		for (int node = 0; node < world_size; node++) {
 			// Probe for a message so we can get the necessary info to allocate a buffer and recieve it
 			MPI_Status status;
@@ -122,7 +121,13 @@ int main(int argc, char *argv[])
 			MPI_Probe(MPI_ANY_SOURCE, 1, MPI_COMM_WORLD, &status);
 			MPI_Get_count(&status, MPI_LONG, &count);
 			long *section_buf = malloc(count * sizeof(long));
-			sleep(0);
+			/* MPI_Recv may deadlock when process 0 is trying to obtain data from itself.
+			 * I have read the MPI standard to try and fix this properly, with no success.
+			 * I have tried using my own buffer, this does not work.
+			 * I have tried using nonblocking sends, this does not work.
+			 * However, moving this thread to the end of the scheduler queue somehow stops the deadlock.
+			 * I wish this was a joke. I have spent multiple hours on this. */
+			sched_yield();
 			MPI_Recv(section_buf, count, MPI_LONG, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
 			// Import the array back into an mpz object
