@@ -16,6 +16,20 @@
 
 #include "factorial.h"
 
+#define S_RECEIVED 0b01
+#define S_COMPLETE 0b10
+
+// Result needs to be passed in as a pointer because mpz_t is an array type
+struct RecvData {
+	MPI_Request request;
+	mpz_t section;
+	mpz_t *result;
+	long *section_buf;
+	int count;
+	int source;
+	char status;
+};
+
 static const char *help =\
 "Usage: mpirun [OPTIONS] factorial-mpi [OPTIONS]\n\
 This program generates a factorial with parallel processing using both MPI and OS threads.\n\
@@ -35,10 +49,8 @@ void *gen_section_mpi(void *arg)
 {
 	long number = *(long*) arg;
 
-	int world_size;
+	int world_size, world_rank;
 	MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-
-	int world_rank;
 	MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
 	// Calculate what section of the factorial we want to generate.
@@ -47,6 +59,7 @@ void *gen_section_mpi(void *arg)
 
 	// Start generating factorial
 	mpz_t section;
+	mpz_init(section);
 	gen_factorial_section(section, start, end);
 
 	// Export the result to an array that we can send over MPI
@@ -59,14 +72,49 @@ void *gen_section_mpi(void *arg)
 	return NULL;
 }
 
+void *import_section(void *arg)
+{
+	struct RecvData *data = (struct RecvData*) arg;
+	MPI_Wait(&data->request, MPI_STATUS_IGNORE);
+
+	// Import the array back into an mpz object
+	mpz_init(data->section);
+	mpz_import(data->section, data->count, -1, sizeof(long), 0, 0, data->section_buf);
+	free(data->section_buf);
+	data->status |= S_RECEIVED;
+
+	return NULL;
+}
+
+void *reduce_result(void *arg)
+{
+	struct RecvData *ndata = (struct RecvData*) arg;
+	int world_size;
+	MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+	bool finished = false;
+	while (!finished) {
+		finished = true;
+		for (int node = 0; node < world_size; node++) {
+			if (!(ndata[node].status & S_RECEIVED)) finished = false;
+			else if (!(ndata[node].status & S_COMPLETE)) {
+				// Multiply the recovered section into the final result
+				mpz_mul(*ndata[node].result, *ndata[node].result, ndata[node].section);
+				mpz_clear(ndata[node].section);
+				ndata[node].status |= S_COMPLETE;
+			}
+		}
+	}
+
+	return NULL;
+}
+
 int main(int argc, char *argv[])
 {
 	MPI_Init(&argc, &argv);
 
-	int world_size;
+	int world_size, world_rank;
 	MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-
-	int world_rank;
 	MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
 	long number = 0;
@@ -110,42 +158,41 @@ int main(int argc, char *argv[])
 	if (world_rank == 0) {
 		double start_time = MPI_Wtime();
 
+		pthread_t section_thread, reduce_thread;
+		pthread_t import_thread[world_size];
+
 		// Generate the master node's section of the factorial
-		pthread_t thread;
-		pthread_create(&thread, NULL, gen_section_mpi, &number);
+		pthread_create(&section_thread, NULL, gen_section_mpi, &number);
+
+		// Set up shared storage
+		struct RecvData ndata[world_size];
+		memset(ndata, 0, sizeof(struct RecvData) * world_size);
 
 		mpz_t result;
 		mpz_init_set_ui(result, 1);
 
-		mpz_t section;
-		mpz_init(section);
+		pthread_create(&reduce_thread, NULL, reduce_result, ndata);
 
 		// Get the results from all of the nodes
 		for (int node = 0; node < world_size; node++) {
 			// Probe for a message so we can get the necessary info to allocate a buffer and recieve it
 			MPI_Status status;
-			int count;
 			MPI_Probe(MPI_ANY_SOURCE, 1, MPI_COMM_WORLD, &status);
-			MPI_Get_count(&status, MPI_LONG, &count);
-			long *section_buf = malloc(count * sizeof(long));
-			/* MPI_Recv may deadlock when process 0 is trying to obtain data from itself.
-			 * I have read the MPI standard to try and fix this properly, with no success.
-			 * I have tried using my own buffer, this does not work.
-			 * I have tried using nonblocking sends, this does not work.
-			 * However, moving this thread to the end of the scheduler queue somehow stops the deadlock.
-			 * I wish this was a joke. I have spent multiple hours on this. */
+
+			// Set up shared data for receiving
+			struct RecvData *data = &ndata[status.MPI_SOURCE];
+			data->result = &result;
+			data->source = status.MPI_SOURCE;
+			MPI_Get_count(&status, MPI_LONG, &data->count);
+			data->section_buf = malloc(data->count * sizeof(long));
 			sched_yield();
-			MPI_Recv(section_buf, count, MPI_LONG, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			MPI_Irecv(data->section_buf, data->count, MPI_LONG, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, &data->request);
 
-			// Import the array back into an mpz object
-			mpz_import(section, count, -1, sizeof(long), 0, 0, section_buf);
-			free(section_buf);
-
-			// Multiply the recovered section into the final result
-			mpz_mul(result, result, section);
+			// Initialize receiving thread
+			pthread_create(&import_thread[data->source], NULL, import_section, data);
 		}
 
-		mpz_clear(section);
+		pthread_join(reduce_thread, NULL);
 
 		printf("Successfully generated %ld!\n", number);
 		if (printing) gmp_printf("%Zd\n", result);
